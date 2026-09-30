@@ -1,0 +1,191 @@
+"""Coletores de vagas. Cada função recebe a config da fonte e devolve list[Vaga].
+
+Todas usam endpoints públicos (sem login). Erros de uma empresa/termo não derrubam o resto.
+"""
+import html as _html
+import logging
+import re
+
+import requests
+
+from .modelo import Vaga
+from .util import limpar_html, normalizar, parse_data
+
+log = logging.getLogger(__name__)
+
+HEADERS = {"User-Agent": "vagas-estagio-bot/1.0 (projeto pessoal de estudante)"}
+TIMEOUT = 20
+
+
+def _get(url, params=None):
+    r = requests.get(url, params=params, headers=HEADERS, timeout=TIMEOUT)
+    r.raise_for_status()
+    return r.json()
+
+
+def _modalidade_por_texto(texto: str) -> str:
+    t = normalizar(texto)
+    if re.search(r"remot|remote|home ?office|anywhere", t):
+        return "Remoto"
+    if re.search(r"hibrid|hybrid", t):
+        return "Híbrido"
+    return "Presencial" if t.strip() else "Não informado"
+
+
+# ---------------------------------------------------------------- Gupy (Brasil)
+_GUPY_MOD = {"remote": "Remoto", "hybrid": "Híbrido", "on-site": "Presencial", "onsite": "Presencial"}
+
+# O endpoint público mudou de host; tentamos o atual primeiro e o antigo como reserva.
+_GUPY_HOSTS = [
+    "https://employability-portal.gupy.io/api/v1/jobs",
+    "https://portal.api.gupy.io/api/v1/jobs",
+]
+_gupy_host_ok: str | None = None
+
+
+def _gupy_pagina(termo: str, limite: int, offset: int) -> list[dict]:
+    """Busca uma página. 404 = host errado ou sem resultados; tenta o próximo host."""
+    global _gupy_host_ok
+    hosts = [_gupy_host_ok] if _gupy_host_ok else _GUPY_HOSTS
+    ultimo_erro = None
+    for host in hosts:
+        try:
+            dados = _get(host, {"jobName": termo, "limit": limite, "offset": offset})
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                ultimo_erro = e
+                continue
+            raise
+        _gupy_host_ok = host
+        if isinstance(dados, list):
+            return dados
+        return dados.get("data") or dados.get("jobs") or dados.get("results") or []
+    if _gupy_host_ok:          # host funciona, só não há vagas para o termo
+        return []
+    raise ultimo_erro or requests.RequestException("Gupy indisponível")
+
+
+def buscar_gupy(cfg) -> list[Vaga]:
+    vagas: dict[str, Vaga] = {}
+    limite = cfg.get("limite", 10)
+    paginas = cfg.get("max_paginas", 5)
+    for termo in cfg.get("termos", []):
+        for pagina in range(paginas):
+            try:
+                itens = _gupy_pagina(termo, limite, pagina * limite)
+            except requests.RequestException as e:
+                log.warning("Gupy '%s' falhou: %s", termo, e)
+                break
+            for j in itens:
+                uid = f"gupy:{j.get('id')}"
+                if uid in vagas:
+                    continue
+                mod = _GUPY_MOD.get(j.get("workplaceType") or "") or (
+                    "Remoto" if j.get("isRemoteWork") else "Não informado")
+                local = ", ".join(x for x in (j.get("city"), j.get("state"), j.get("country")) if x)
+                vagas[uid] = Vaga(
+                    uid=uid, fonte="Gupy",
+                    empresa=j.get("careerPageName") or j.get("company") or "?",
+                    cargo=j.get("name") or j.get("title") or "",
+                    url=j.get("jobUrl") or j.get("applyUrl") or "",
+                    modalidade=mod, local=local,
+                    descricao=limpar_html(j.get("description")),
+                    publicado=parse_data(j.get("publishedDate")),
+                    prazo=parse_data(j.get("applicationDeadline")),
+                    tipo=j.get("type") or j.get("employmentType") or "",
+                    aceita_brasil=True,  # Gupy é plataforma brasileira
+                )
+            if len(itens) < limite:   # última página
+                break
+    return list(vagas.values())
+
+
+# ---------------------------------------------------------------- Greenhouse
+def buscar_greenhouse(cfg) -> list[Vaga]:
+    vagas = []
+    for board in cfg.get("empresas", []):
+        try:
+            dados = _get(f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs",
+                         {"content": "true"})
+        except requests.RequestException as e:
+            log.warning("Greenhouse '%s' falhou: %s", board, e)
+            continue
+        for j in dados.get("jobs", []):
+            local = (j.get("location") or {}).get("name", "")
+            vagas.append(Vaga(
+                uid=f"greenhouse:{board}:{j.get('id')}", fonte="Greenhouse",
+                empresa=j.get("company_name") or board.title(),
+                cargo=j.get("title") or "",
+                url=j.get("absolute_url") or "",
+                modalidade=_modalidade_por_texto(local), local=local,
+                # o 'content' do Greenhouse vem com HTML escapado duas vezes
+                descricao=limpar_html(_html.unescape(j.get("content") or "")),
+                publicado=parse_data(j.get("first_published") or j.get("updated_at")),
+            ))
+    return vagas
+
+
+# ---------------------------------------------------------------- Lever
+_LEVER_MOD = {"remote": "Remoto", "hybrid": "Híbrido", "onsite": "Presencial"}
+
+
+def buscar_lever(cfg) -> list[Vaga]:
+    vagas = []
+    for emp in cfg.get("empresas", []):
+        try:
+            dados = _get(f"https://api.lever.co/v0/postings/{emp}", {"mode": "json"})
+        except requests.RequestException as e:
+            log.warning("Lever '%s' falhou: %s", emp, e)
+            continue
+        for j in dados:
+            cat = j.get("categories") or {}
+            local = cat.get("location") or ", ".join(cat.get("allLocations") or [])
+            partes = [j.get("descriptionPlain") or ""]
+            for lista in j.get("lists") or []:
+                partes += [lista.get("text") or "", limpar_html(lista.get("content"))]
+            vagas.append(Vaga(
+                uid=f"lever:{emp}:{j.get('id')}", fonte="Lever",
+                empresa=emp.replace("-", " ").title(),
+                cargo=j.get("text") or "",
+                url=j.get("hostedUrl") or "",
+                modalidade=_LEVER_MOD.get(j.get("workplaceType") or "") or _modalidade_por_texto(local),
+                local=local,
+                descricao="\n".join(p for p in partes if p),
+                publicado=parse_data(j.get("createdAt")),
+                tipo=cat.get("commitment") or "",
+            ))
+    return vagas
+
+
+# ---------------------------------------------------------------- Remotive (agregador remoto)
+def buscar_remotive(cfg) -> list[Vaga]:
+    vagas: dict[str, Vaga] = {}
+    for termo in cfg.get("termos", []):
+        try:
+            dados = _get("https://remotive.com/api/remote-jobs", {"search": termo})
+        except requests.RequestException as e:
+            log.warning("Remotive '%s' falhou: %s", termo, e)
+            continue
+        for j in dados.get("jobs", []):
+            uid = f"remotive:{j.get('id')}"
+            vagas.setdefault(uid, Vaga(
+                uid=uid, fonte="Remotive",
+                empresa=j.get("company_name") or "?",
+                cargo=j.get("title") or "",
+                url=j.get("url") or "",
+                modalidade="Remoto",
+                local=j.get("candidate_required_location") or "",
+                descricao=limpar_html(j.get("description")),
+                publicado=parse_data(j.get("publication_date")),
+                tipo=j.get("job_type") or "",
+                oficial=False,
+            ))
+    return list(vagas.values())
+
+
+FONTES = {
+    "gupy": buscar_gupy,
+    "greenhouse": buscar_greenhouse,
+    "lever": buscar_lever,
+    "remotive": buscar_remotive,
+}

@@ -1,0 +1,91 @@
+# ============================================================
+#  Bot de vagas de estágio — configuração
+#  Acentos e maiúsculas não importam na comparação.
+# ============================================================
+
+area:
+  # Basta UMA destas palavras aparecer no TÍTULO da vaga
+  palavras_titulo:
+    - segurança
+    - security
+    - cibersegurança
+    - cybersecurity
+    - cyber
+    - soc
+    - pentest
+    - redes
+    - network
+    - infraestrutura
+    - infrastructure
+    - infra
+    - cloud
+    - devops
+    - ti
+    - tecnologia
+    - ia
+    - ai
+    - inteligência artificial
+    - machine learning
+  # ...ou uma destas na DESCRIÇÃO (termos mais específicos)
+  palavras_descricao:
+    - segurança da informação
+    - cibersegurança
+    - cybersecurity
+    - information security
+    - pentest
+    - redes de computadores
+    - computer networks
+    - machine learning
+    - inteligência artificial
+
+# Vaga é descartada se o título tiver qualquer um destes
+excluir_titulo:
+  - segurança do trabalho
+  - segurança patrimonial
+  - sênior
+  - senior
+  - pleno
+  - especialista
+  - jurídico
+  - direito
+  - contábil
+  - enfermagem
+
+local:
+  cidades_hibrido_presencial: [uberlândia]
+  incluir_presencial: false            # true = aceita presencial em Uberlândia também
+  incluir_remotas_sem_pais_claro: true # remota sem país informado entra, com alerta
+
+fontes:
+  gupy:            # vagas brasileiras (página de carreira oficial das empresas)
+    ativo: true
+    limite: 10       # itens por página (a API costuma paginar de 10 em 10)
+    max_paginas: 5
+    # A busca da Gupy é pelo TÍTULO: termos curtos acham mais vagas.
+    termos:
+      - estágio segurança
+      - estágio cibersegurança
+      - estágio redes
+      - estágio infraestrutura
+      - estágio TI
+      - estágio tecnologia
+      - estágio suporte
+      - estágio dados
+      - estágio inteligência artificial
+      - estagiário TI
+      - estagiário segurança
+      - segurança da informação
+      - cibersegurança
+  greenhouse:      # página oficial de vagas de empresas que usam Greenhouse
+    ativo: true
+    empresas: [cloudflare, gitlab, nubank]
+  lever:           # página oficial de vagas de empresas que usam Lever
+    ativo: true
+    empresas: [palantir]
+  remotive:        # agregador de vagas remotas
+    ativo: true
+    intervalo_horas: 6   # a Remotive pede poucas consultas por dia
+    termos: [intern, internship]
+
+max_vagas_por_email: 25
+esquecer_apos_dias: 180
