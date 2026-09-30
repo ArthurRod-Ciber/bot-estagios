@@ -22,6 +22,10 @@ area:
     - devops
     - ti
     - tecnologia
+    - suporte técnico
+    - suporte de ti
+    - help desk
+    - service desk
     - ia
     - ai
     - inteligência artificial
@@ -50,6 +54,14 @@ excluir_titulo:
   - direito
   - contábil
   - enfermagem
+  - comercial
+  - cliente
+  - customer
+  - vendas
+  - atendimento
+  - marketing
+  - financeiro
+  - recursos humanos
 
 local:
   cidades_hibrido_presencial: [uberlândia]
@@ -69,7 +81,8 @@ fontes:
       - estágio infraestrutura
       - estágio TI
       - estágio tecnologia
-      - estágio suporte
+      - estágio suporte técnico
+      - estágio help desk
       - estágio dados
       - estágio inteligência artificial
       - estagiário TI

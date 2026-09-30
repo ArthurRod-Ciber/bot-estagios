@@ -4,19 +4,26 @@ import smtplib
 import ssl
 from datetime import datetime
 from email.message import EmailMessage
+from zoneinfo import ZoneInfo
 from html import escape
 
 from .modelo import Vaga
 
 log = logging.getLogger(__name__)
+FUSO = ZoneInfo(os.environ.get("TZ_EMAIL", "America/Sao_Paulo"))
 
 
 def _linha_local(v: Vaga) -> str:
-    return f"{v.empresa} · {v.modalidade}" + (f" · {v.local}" if v.local else "")
+    partes = [v.empresa, v.modalidade]
+    if v.local:
+        partes.append(v.local)
+    if v.publicado:
+        partes.append("publicada " + v.publicado.astimezone(FUSO).strftime("%d/%m"))
+    return " · ".join(partes)
 
 
 def montar(vagas: list[Vaga], total: int) -> tuple[str, str, str]:
-    hoje = datetime.now().strftime("%d/%m %H:%M")
+    hoje = datetime.now(FUSO).strftime("%d/%m %H:%M")
     assunto = f"[Vagas] {len(vagas)} nova(s) vaga(s) de estágio — {hoje}"
     resto = total - len(vagas)
     aviso_resto = f"Mais {resto} vaga(s) virão no próximo envio." if resto > 0 else ""

@@ -3,6 +3,7 @@
 Todas usam endpoints públicos (sem login). Erros de uma empresa/termo não derrubam o resto.
 """
 import html as _html
+import json
 import logging
 import re
 
@@ -100,6 +101,55 @@ def buscar_gupy(cfg) -> list[Vaga]:
     return list(vagas.values())
 
 
+_RE_NEXT = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S)
+_RE_SCRIPT_STYLE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.S | re.I)
+_GUPY_CHAVES = ("description", "responsibilities", "prerequisites", "additionalInformation")
+
+
+def _procurar_textos(obj, chaves) -> dict[str, str]:
+    """Procura, em qualquer nível do JSON, o primeiro texto de cada chave pedida."""
+    achados, pilha = {}, [obj]
+    while pilha:
+        o = pilha.pop()
+        if isinstance(o, dict):
+            for k, val in o.items():
+                if k in chaves and isinstance(val, str) and val.strip() and k not in achados:
+                    achados[k] = val
+                elif isinstance(val, (dict, list)):
+                    pilha.append(val)
+        elif isinstance(o, list):
+            pilha.extend(o)
+    return achados
+
+
+def _itens(texto_html: str, maximo: int = 450) -> str:
+    linhas = [l.strip(" -•*·\t") for l in limpar_html(texto_html).split("\n")]
+    trecho = " • ".join(l for l in linhas if l)
+    return trecho[:maximo] + ("…" if len(trecho) > maximo else "")
+
+
+def detalhar_gupy(v: Vaga, html_pagina: str | None = None) -> None:
+    """Abre a página da vaga e completa descrição e requisitos (a listagem só traz um resumo)."""
+    if html_pagina is None:
+        r = requests.get(v.url, headers=HEADERS, timeout=TIMEOUT)
+        r.raise_for_status()
+        html_pagina = r.text
+
+    m = _RE_NEXT.search(html_pagina)
+    if m:
+        try:
+            dados = _procurar_textos(json.loads(m.group(1)), _GUPY_CHAVES)
+        except json.JSONDecodeError:
+            dados = {}
+        if dados:
+            v.descricao = "\n".join(limpar_html(dados[k]) for k in _GUPY_CHAVES if k in dados)
+            if dados.get("prerequisites"):
+                v.requisitos = _itens(dados["prerequisites"])
+            return
+    # Plano B: texto da página inteira (sem scripts), e o filtro tenta achar a seção de requisitos
+    v.descricao = limpar_html(_RE_SCRIPT_STYLE.sub("", html_pagina))
+
+
 # ---------------------------------------------------------------- Greenhouse
 def buscar_greenhouse(cfg) -> list[Vaga]:
     vagas = []
@@ -182,6 +232,9 @@ def buscar_remotive(cfg) -> list[Vaga]:
             ))
     return list(vagas.values())
 
+
+# Fontes cuja listagem vem resumida e que sabemos detalhar
+DETALHAR = {"Gupy": detalhar_gupy}
 
 FONTES = {
     "gupy": buscar_gupy,

@@ -77,6 +77,14 @@ def main() -> int:
     log.info("%d relevante(s), %d nova(s).", len(relevantes), len(novas))
 
     lote = novas[: cfg.get("max_vagas_por_email", 25)]
+    for v in lote:
+        detalhar = fontes.DETALHAR.get(v.fonte)
+        if detalhar:
+            try:
+                detalhar(v)
+            except Exception as e:  # sem detalhe, a vaga ainda vai, só com menos informação
+                log.warning("Não consegui detalhar %s: %s", v.url, e)
+        filtro.anotar(v)
     if lote:
         enviar(lote, total=len(novas), dry_run=args.dry_run)
         for v in lote:

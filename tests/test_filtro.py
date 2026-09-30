@@ -57,4 +57,23 @@ def test_extrair_requisitos_e_alerta_periodo():
     desc = "Sobre nós\nSomos legais\nRequisitos\nCursando a partir do 4º período\nNoções de Linux\nInglês"
     assert "Linux" in extrair_requisitos(desc)
     v = vaga(descricao=desc)
-    assert F.avaliar(v) and any("período" in a for a in v.alertas)
+    assert F.avaliar(v)
+    F.anotar(v)
+    assert "Linux" in v.requisitos
+    assert any("4º período" in a for a in v.alertas)
+
+def test_periodo_sem_falso_positivo():
+    for desc in ("Estágio de 1 ano com possibilidade de efetivação", "Desejável 2 anos de experiência"):
+        v = vaga(descricao=desc)
+        F.anotar(v)
+        assert not any("período" in a for a in v.alertas), desc
+    for desc in ("Cursando o 3º semestre", "a partir do 5 periodo", "estar no 2º ano"):
+        v = vaga(descricao=desc)
+        F.anotar(v)
+        assert any("período" in a for a in v.alertas), desc
+
+def test_suporte_so_tecnico():
+    assert F.avaliar(vaga(cargo="Estágio em Suporte Técnico"))
+    assert not F.avaliar(vaga(cargo="Pessoa Estagiária em Suporte ao Cliente SaaS (Remoto)"))
+    assert not F.avaliar(vaga(cargo="Estágio em Suporte Comercial (Vaga Remota - BH e SP)"))
+    assert F.avaliar(vaga(cargo="Programa de estágio - TI"))

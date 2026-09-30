@@ -19,7 +19,12 @@ RE_AUTORIZACAO = re.compile(
     r"|must (be )?(reside|live|located|based) in"
     r"|visa sponsorship|security clearance")
 
-RE_PERIODO = re.compile(r"(\d{1,2})\s*(o|º|°|ª)?\s*(periodo|semestre|ano)")
+# Exige contexto de período mínimo: "3º período", "a partir do 4 semestre", "cursando o 2º ano".
+# Não casa com "estágio de 1 ano" nem "2 anos de experiência".
+# (após normalizar, "º" vira "o" e "ª" vira "a")
+RE_PERIODO = re.compile(
+    r"\b\d{1,2}\s*(?:o|a|°)\s*(?:periodo|semestre|ano)\b"
+    r"|(?:a partir d[oa]|minimo(?: de)?|cursando(?: entre)?(?: o| a)?|entre o)\s+\d{1,2}\s*(?:periodo|semestre|ano)\b")
 
 RE_SECAO_REQ = re.compile(
     r"requisitos|requirements|qualifica|o que (voce precisa|esperamos|buscamos)"
@@ -96,16 +101,25 @@ class Filtro:
                 return False
             v.alertas.append("Modalidade não informada na vaga.")
 
-        # 5. Requisitos e alertas extras
-        v.requisitos = extrair_requisitos(v.descricao)
+        return True
+
+    def anotar(self, v: Vaga) -> None:
+        """Preenche requisitos e alertas finais. Chamado depois de detalhar a vaga."""
+        if not v.requisitos:
+            v.requisitos = extrair_requisitos(v.descricao)
         if not v.requisitos:
             v.alertas.append("Requisitos não identificados automaticamente: confira no link.")
-        m = RE_PERIODO.search(desc)
+        norm = normalizar(v.descricao)
+        m = RE_PERIODO.search(norm)
         if m:
-            v.alertas.append(f"Menciona período/semestre ('{m.group(0)}'): confira se o 3º período atende.")
+            # mostra o trecho original (com acentos) quando o texto normalizado tem o mesmo tamanho
+            if len(norm) == len(v.descricao):
+                trecho = v.descricao[m.start():m.end()]
+            else:
+                trecho = re.sub(r"(\d)\s*o\b", r"\1º", m.group(0))
+            v.alertas.append(f"Exige período/semestre mínimo ('{trecho}'): confira se o 3º período atende.")
         if not v.oficial:
             v.alertas.append(f"Link de agregador ({v.fonte}): confirme vaga e inscrições na página oficial da empresa.")
-        return True
 
     def _remota_ok(self, v: Vaga, desc: str) -> bool:
         if v.aceita_brasil is None:
