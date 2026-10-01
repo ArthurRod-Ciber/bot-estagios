@@ -37,16 +37,19 @@ def _modalidade_por_texto(texto: str) -> str:
 # ---------------------------------------------------------------- Gupy (Brasil)
 _GUPY_MOD = {"remote": "Remoto", "hybrid": "Híbrido", "on-site": "Presencial", "onsite": "Presencial"}
 
-# Endpoint público que o próprio portal.gupy.io usa (o antigo portal.api.gupy.io foi desativado).
-_GUPY_URL = "https://employability-portal.gupy.io/api/v1/jobs"
+# Endpoint que o próprio portal.gupy.io usa (descoberto pelo DevTools em 30/09/2026).
+# Histórico: portal.api.gupy.io -> employability-portal.gupy.io/api/v1 -> portal.gupy.io/api/job-search.
+# Se mudar de novo, basta trocar "url_api" no config.yaml.
+_GUPY_URL_PADRAO = "https://portal.gupy.io/api/job-search/jobs"
+_GUPY_HEADERS = {**HEADERS, "Accept": "application/json", "Referer": "https://portal.gupy.io/job-search"}
 _TENTATIVAS = 3
 
 
-def _gupy_pagina(termo: str, limite: int, offset: int) -> list[dict]:
+def _gupy_pagina(url: str, termo: str, limite: int, offset: int) -> list[dict]:
     """Busca uma página, repetindo em bloqueios temporários da borda (403/404/429/5xx)."""
     for tentativa in range(1, _TENTATIVAS + 1):
-        r = requests.get(_GUPY_URL, params={"jobName": termo, "limit": limite, "offset": offset},
-                         headers=HEADERS, timeout=TIMEOUT)
+        r = requests.get(url, params={"jobName": termo, "limit": limite, "offset": offset},
+                         headers=_GUPY_HEADERS, timeout=TIMEOUT)
         if r.ok:
             dados = r.json()
             if isinstance(dados, list):
@@ -63,7 +66,8 @@ def _gupy_pagina(termo: str, limite: int, offset: int) -> list[dict]:
 
 def buscar_gupy(cfg) -> list[Vaga]:
     vagas: dict[str, Vaga] = {}
-    limite = cfg.get("limite", 10)
+    url = cfg.get("url_api") or _GUPY_URL_PADRAO
+    limite = cfg.get("limite", 12)
     paginas = cfg.get("max_paginas", 5)
     falhas = 0
     for termo in cfg.get("termos", []):
@@ -72,7 +76,7 @@ def buscar_gupy(cfg) -> list[Vaga]:
             break
         for pagina in range(paginas):
             try:
-                itens = _gupy_pagina(termo, limite, pagina * limite)
+                itens = _gupy_pagina(url, termo, limite, pagina * limite)
             except requests.RequestException as e:
                 log.warning("Gupy '%s' falhou: %s", termo, e)
                 falhas += 1

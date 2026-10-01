@@ -71,7 +71,8 @@ local:
 fontes:
   gupy:            # vagas brasileiras (página de carreira oficial das empresas)
     ativo: true
-    limite: 10       # itens por página (a API costuma paginar de 10 em 10)
+    url_api: https://portal.gupy.io/api/job-search/jobs   # troque aqui se a Gupy mudar de novo
+    limite: 12       # itens por página (o mesmo que o site usa)
     max_paginas: 5
     # A busca da Gupy é pelo TÍTULO: termos curtos acham mais vagas.
     termos:
