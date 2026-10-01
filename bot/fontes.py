@@ -6,6 +6,7 @@ import html as _html
 import json
 import logging
 import re
+import time
 
 import requests
 
@@ -36,46 +37,45 @@ def _modalidade_por_texto(texto: str) -> str:
 # ---------------------------------------------------------------- Gupy (Brasil)
 _GUPY_MOD = {"remote": "Remoto", "hybrid": "Híbrido", "on-site": "Presencial", "onsite": "Presencial"}
 
-# O endpoint público mudou de host; tentamos o atual primeiro e o antigo como reserva.
-_GUPY_HOSTS = [
-    "https://employability-portal.gupy.io/api/v1/jobs",
-    "https://portal.api.gupy.io/api/v1/jobs",
-]
-_gupy_host_ok: str | None = None
+# Endpoint público que o próprio portal.gupy.io usa (o antigo portal.api.gupy.io foi desativado).
+_GUPY_URL = "https://employability-portal.gupy.io/api/v1/jobs"
+_TENTATIVAS = 3
 
 
 def _gupy_pagina(termo: str, limite: int, offset: int) -> list[dict]:
-    """Busca uma página. 404 = host errado ou sem resultados; tenta o próximo host."""
-    global _gupy_host_ok
-    hosts = [_gupy_host_ok] if _gupy_host_ok else _GUPY_HOSTS
-    ultimo_erro = None
-    for host in hosts:
-        try:
-            dados = _get(host, {"jobName": termo, "limit": limite, "offset": offset})
-        except requests.HTTPError as e:
-            if e.response is not None and e.response.status_code == 404:
-                ultimo_erro = e
-                continue
-            raise
-        _gupy_host_ok = host
-        if isinstance(dados, list):
-            return dados
-        return dados.get("data") or dados.get("jobs") or dados.get("results") or []
-    if _gupy_host_ok:          # host funciona, só não há vagas para o termo
-        return []
-    raise ultimo_erro or requests.RequestException("Gupy indisponível")
+    """Busca uma página, repetindo em bloqueios temporários da borda (403/404/429/5xx)."""
+    for tentativa in range(1, _TENTATIVAS + 1):
+        r = requests.get(_GUPY_URL, params={"jobName": termo, "limit": limite, "offset": offset},
+                         headers=HEADERS, timeout=TIMEOUT)
+        if r.ok:
+            dados = r.json()
+            if isinstance(dados, list):
+                return dados
+            return dados.get("data") or dados.get("jobs") or dados.get("results") or []
+        if r.status_code in (403, 404, 429) or r.status_code >= 500:
+            log.info("Gupy '%s': HTTP %s (tentativa %d/%d) %s", termo, r.status_code,
+                     tentativa, _TENTATIVAS, r.text[:120].replace("\n", " "))
+            time.sleep(2 * tentativa)
+            continue
+        r.raise_for_status()
+    raise requests.HTTPError(f"HTTP {r.status_code} após {_TENTATIVAS} tentativas: {r.url}")
 
 
 def buscar_gupy(cfg) -> list[Vaga]:
     vagas: dict[str, Vaga] = {}
     limite = cfg.get("limite", 10)
     paginas = cfg.get("max_paginas", 5)
+    falhas = 0
     for termo in cfg.get("termos", []):
+        if falhas >= 2 and not vagas:
+            log.warning("Gupy parece indisponível ou bloqueando este servidor; pulando os demais termos.")
+            break
         for pagina in range(paginas):
             try:
                 itens = _gupy_pagina(termo, limite, pagina * limite)
             except requests.RequestException as e:
                 log.warning("Gupy '%s' falhou: %s", termo, e)
+                falhas += 1
                 break
             for j in itens:
                 uid = f"gupy:{j.get('id')}"
