@@ -65,7 +65,7 @@ excluir_titulo:
 
 local:
   cidades_hibrido_presencial: [uberlândia]
-  incluir_presencial: false            # true = aceita presencial em Uberlândia também
+  incluir_presencial: true            
   incluir_remotas_sem_pais_claro: true # remota sem país informado entra, com alerta
 
 fontes:
